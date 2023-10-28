@@ -16,6 +16,11 @@ import requests
 class User:
     def __init__(self, user_id, name, nickname):
         self.id, self.name, self.nickname = user_id, name, nickname
+
+
+class ActiveUser:
+    def __init__(self, user_id):
+        self.id = user_id
         self.current_func = []
 
 
@@ -34,7 +39,7 @@ class BotStorage:
         self._admin_id = os.environ["VOLLEY_BOT_ADMIN"] if admin_id_ is None else admin_id_
 
         self._allowed_users = {}
-        self._active_users = set()
+        self._active_users = {}
         self._teams = set()
         self._voting_results = {}
 
@@ -53,9 +58,9 @@ class BotStorage:
         return self._admin_id
 
     def add_user_to_active_list(self, user_id: int) -> None:
-        self._active_users.add(user_id)
+        self._active_users[user_id] = ActiveUser(user_id)
 
-    def get_active_users(self) -> set:
+    def get_active_users(self) -> {}:
         return self._active_users
 
     def is_user_allowed(self, user_id) -> bool:
@@ -64,8 +69,10 @@ class BotStorage:
     def get_allowed_users(self):
         return self._allowed_users
 
-    def get_user_handle(self, user_id) -> User:
-        return self._allowed_users[user_id]
+    def get_active_user_handle(self, user_id) -> ActiveUser:
+        if user_id not in self.get_active_users():
+            self.add_user_to_active_list(user_id)
+        return self._active_users[user_id]
 
     def get_teams(self) -> set:
         return self._teams
@@ -117,8 +124,8 @@ class VolleyBot:
     def add_user_to_active_list(self, user_id: int) -> None:
         return self._storage.add_user_to_active_list(user_id)
 
-    def get_user_handle(self, user_id) -> User:
-        return self._storage.get_user_handle(user_id)
+    def get_active_user_handle(self, user_id) -> ActiveUser:
+        return self._storage.get_active_user_handle(user_id)
 
     def clear_voting_results(self):
         return self._storage.clear_voting_results()
@@ -128,10 +135,10 @@ class VolleyBot:
             self.get_bot().send_message(user.id, text)
 
     def bot_goto_start_menu(self, user_id):
-        self.get_user_handle(user_id).current_func = [["main_menu", "", ""]]
+        self.get_active_user_handle(user_id).current_func = [["main_menu", "", ""]]
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        kb.add(*[types.KeyboardButton(n) for n in ('Schedule', 'Competitions')])
-        kb.add(types.KeyboardButton('Vote'))
+        kb.add(*[types.KeyboardButton(n) for n in ('Расписание', 'Соревнования')])
+        kb.add(types.KeyboardButton('Голосование'))
         kb.add(types.KeyboardButton('Прогноз погоды'))
         return kb
 
@@ -153,7 +160,7 @@ class VolleyBot:
         self.add_user_to_active_list(chat_id)
 
         user_id = msg.from_user.id
-        # пока проверка отключим функциональность
+        # пока идёт проверка, отключим функциональность, ограничивающую пользователей бота
         # if not self._storage.is_user_allowed(user_id):  # проверяем, разрешённый ли это пользователь
         #     bot.send_message(chat_id, "Для доступа обратитесь к администратору")
         #     return
@@ -166,29 +173,30 @@ class VolleyBot:
                                     reply_markup=kb)  # welcome message
 
     def bot_message(self, msg):
-        return_btn_name = 'Return to the main menu'
+        return_btn_name = 'В главное меню'
         user_id = msg.from_user.id
-        current_func = self.get_user_handle(user_id).current_func
+        current_func = self.get_active_user_handle(user_id).current_func
 
         if msg.text == return_btn_name:
             kb = self.bot_goto_start_menu(user_id)
-            self.get_bot().send_message(msg.chat.id, 'Choose a button', reply_markup=kb)
+            self.get_bot().send_message(msg.chat.id, 'Выберете команду', reply_markup=kb)
             return
 
-        elif msg.text == 'Vote':
+        elif msg.text == 'Голосование':
             self.bot_goto_x_menu(msg, 'Кто будет сегодня на тренировке?', ['Буду', 'Не буду'], return_btn_name, 2)
 
         elif msg.text == 'total_results':
             self.bot_total_results(msg)
 
-        elif msg.text == 'Schedule':
-            self.bot_goto_x_menu(msg, 'Choose the team', ['Каравелла'], return_btn_name, 2)
+        elif msg.text == 'Расписание':
+            self.bot_goto_x_menu(msg, 'Выберете команду', ['Каравелла'], return_btn_name, 2)
 
-        elif msg.text == 'Competitions':
-            self.bot_goto_x_menu(msg, 'Choose the button', ['ЧГА'], return_btn_name, 2)
+        elif msg.text == 'Соревнования':
+            self.bot_goto_x_menu(msg, 'Выберете действие', ['Чемпионат г.Архангельска'],
+                                 return_btn_name, 2)
 
         elif msg.text == 'Каравелла':
-            self.bot_goto_x_menu(msg, 'Choose a day of the week', ['Среда', 'Пятница', 'Воскресенье'],
+            self.bot_goto_x_menu(msg, 'Выберете день недели', ['Среда', 'Пятница', 'Воскресенье'],
                                  return_btn_name, 2)
 
         elif msg.text in ['Среда', 'Пятница', 'Воскресенье']:
@@ -197,8 +205,8 @@ class VolleyBot:
             self.bot_goto_x_menu(msg, t, ['Среда', 'Пятница', 'Воскресенье'],
                                  return_btn_name, 2)
 
-        elif msg.text == 'ЧГА':
-            self.bot_goto_x_menu(msg, 'Choose the button', ['Расписание и результаты'], return_btn_name, 2)
+        elif msg.text == 'Чемпионат г.Архангельска':
+            self.bot_goto_x_menu(msg, 'Выберете действие', ['Расписание и результаты'], return_btn_name, 2)
 
         elif msg.text == 'Расписание и результаты':
             kb = types.InlineKeyboardMarkup(row_width=2)
@@ -256,13 +264,13 @@ class VolleyBot:
             elif vote == "Не буду":
                 user_names_with_vote2.append(user_name)
 
-        result_message = "Users with vote 'Буду':\n" + "\n".join(user_names_with_vote1)
-        result_message += "\n\nUsers with vote 'Не буду':\n" + "\n".join(user_names_with_vote2)
+        result_message = "Будут участвовать:\n" + "\n".join(user_names_with_vote1)
+        result_message += "\n\nПропустят тренировку:\n" + "\n".join(user_names_with_vote2)
 
         self.get_bot().send_message(msg.chat.id, result_message)
 
     def bot_show_schedule(self, msg, user_id):
-        current_func = self.get_user_handle(user_id).current_func
+        current_func = self.get_active_user_handle(user_id).current_func
         if len(current_func) < 2 or current_func[-1][0] != 'Расписание и результаты':
             self.bot_goto_start_menu(user_id)
             return
@@ -279,7 +287,7 @@ class VolleyBot:
     # Обработчик выбора inline кнопок
     def bot_handle_button_click(self, call):
         user_id = call.from_user.id
-        current_func = self.get_user_handle(user_id).current_func
+        current_func = self.get_active_user_handle(user_id).current_func
         if len(current_func) < 2 or current_func[-1][0] != 'Расписание и результаты':
             self.bot_goto_start_menu(user_id)
             return
@@ -422,7 +430,7 @@ def reset_voting_results_weekly():
 
 # Функция 'send_scheduled_message' для отправки сообщения каждому пользователю из списка user_ids
 def send_scheduled_message():
-    volleyBot.bot_send_message_to_allowed_users("You need to take the survey. Click on the 'Vote' button.")
+    volleyBot.bot_send_message_to_allowed_users("You need to take the survey. Click on the 'Голосование' button.")
 
 
 # расписываем определенные дни и время, в которые будет выполняться функция send_scheduled_message()
