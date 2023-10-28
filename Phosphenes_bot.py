@@ -12,13 +12,12 @@ import threading
 import sqlite3
 import requests
 
-first_team = ''
-second_team = ''
 
 class User:
     def __init__(self, user_id, name, nickname):
         self.id, self.name, self.nickname = user_id, name, nickname
         self.current_func = []
+
 
 class BotStorage:
     """Хранилище бота"""
@@ -28,7 +27,7 @@ class BotStorage:
 
         if bot_token_ is None and "VOLLEY_BOT_TOKEN" not in os.environ:
             raise AssertionError("Please configure VOLLEY_BOT_TOKEN as os environment variables")
-        self._bot_token = os.environ["TELEBOT_BOT_TOKEN"] if bot_token_ is None else bot_token_
+        self._bot_token = os.environ["VOLLEY_BOT_TOKEN"] if bot_token_ is None else bot_token_
 
         if admin_id_ is None and "VOLLEY_BOT_ADMIN" not in os.environ:
             raise AssertionError("Please configure VOLLEY_BOT_ADMIN as os environment variables")
@@ -84,13 +83,11 @@ class BotStorage:
         sql_connect = sqlite3.connect(self.db_name)
         c = sql_connect.cursor()
 
-        for e in c.execute("select telegram_id, real_name, nickname from main.users where allowed_access <> 0").fetchall():
+        for e in c.execute("select telegram_id, real_name, nickname "
+                           "from main.users where allowed_access <> 0").fetchall():
             self._allowed_users[e[0]] = User(e[0], e[1], e[2])
 
         self._teams = c.execute("select name from teams order by id").fetchall()
-
-        # мапа для выбора кортежа встречающихся команд
-        teams_group_selectors = {}
 
         c.close()
         sql_connect.close()
@@ -106,13 +103,12 @@ class VolleyBot:
 
     def __init__(self, bot_token_: str = None, admin_id_: int = None) -> None:
         self._storage = BotStorage(bot_token_=bot_token_, admin_id_=admin_id_)
-        #self._bot = AsyncTeleBot(self._storage.get_bot_token())
         self._bot = TeleBot(self._storage.get_bot_token())
 
     def __str__(self) -> str:
         return str(self._storage)
 
-    def get_bot(self) -> TeleBot: #AsyncTeleBot:
+    def get_bot(self) -> TeleBot:
         return self._bot
 
     def get_admin_id(self) -> int:
@@ -132,7 +128,7 @@ class VolleyBot:
             self.get_bot().send_message(user.id, text)
 
     def bot_goto_start_menu(self, user_id):
-        self.get_user_handle(user_id).current_func = [("main_menu", "", "")]
+        self.get_user_handle(user_id).current_func = [["main_menu", "", ""]]
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
         kb.add(*[types.KeyboardButton(n) for n in ('Schedule', 'Competitions')])
         kb.add(types.KeyboardButton('Vote'))
@@ -157,25 +153,27 @@ class VolleyBot:
         self.add_user_to_active_list(chat_id)
 
         user_id = msg.from_user.id
-        if not self._storage.is_user_allowed(user_id):  # проверяем, разрешённый ли это пользователь
-            bot.send_message(chat_id, "Для доступа обратитесь к администратору")
-            return
+        # пока проверка отключим функциональность
+        # if not self._storage.is_user_allowed(user_id):  # проверяем, разрешённый ли это пользователь
+        #     bot.send_message(chat_id, "Для доступа обратитесь к администратору")
+        #     return
 
         kb = self.bot_goto_start_menu(user_id)
 
         self.get_bot().send_sticker(chat_id, open('стикер.webp', 'rb'))
         self.get_bot().send_message(chat_id,
-                                    text='Hi, {0.first_name}! Сlick on the button below 👇'.format(msg.from_user),
+                                    text='Hi, {0.first_name}! Click on the button below 👇'.format(msg.from_user),
                                     reply_markup=kb)  # welcome message
 
     def bot_message(self, msg):
         return_btn_name = 'Return to the main menu'
         user_id = msg.from_user.id
-        self.get_user_handle(user_id).current_func.append((msg.text, "", ""))
+        current_func = self.get_user_handle(user_id).current_func
 
         if msg.text == return_btn_name:
             kb = self.bot_goto_start_menu(user_id)
             self.get_bot().send_message(msg.chat.id, 'Choose a button', reply_markup=kb)
+            return
 
         elif msg.text == 'Vote':
             self.bot_goto_x_menu(msg, 'Кто будет сегодня на тренировке?', ['Буду', 'Не буду'], return_btn_name, 2)
@@ -211,51 +209,16 @@ class VolleyBot:
         elif msg.text == 'Прогноз погоды':
             bot.send_message(msg.from_user.id, 'Отправьте боту название города и он скажет, какая там погода')
 
-        elif msg.text not in ['Прогноз погоды', 'Расписание и результаты', 'Return to the main menu', 'ЧГА',
-                              'Среда', 'Пятница', 'Воскресенье', 'Каравелла', 'Competitions', 'Schedule', 'Vote',
-                              'Буду', 'Не буду']:
-            city = msg.text
-            url = 'https://api.openweathermap.org/data/2.5/weather?q=' + city + (
-                '&units=metric&lang=ru&appid=852e6d01a0e4164726ba6652877ff78d')
-            weather_data = requests.get(url).json()
-            print(weather_data)
-            temperature = round(weather_data['main']['temp'])
-            temperature_feels = round(weather_data['main']['feels_like'])
-            wind = round(weather_data['wind']['speed'])
-            if wind < 5:
-                sss = '✅ Погода хорошая, ветра почти нет'
-            elif wind < 10:
-                sss = '🤔 На улице ветрено, оденьтесь чуть теплее'
-            elif wind < 20:
-                sss = '❗️ Ветер очень сильный, будьте осторожны, выходя из дома'
+        else:
+            if len(current_func) > 1 and current_func[-1][0] == 'Прогноз погоды':
+                self.bot_show_weather(city=msg.text, user_id=user_id)
+                return
             else:
-                sss = '❌ На улице шторм, на улицу лучше не выходить'
-            humidity = round(weather_data['main']['humidity'])
-            temperature_max = round(weather_data['main']['temp_max'])
-            temperature_min = round(weather_data['main']['temp_min'])
-            w_now = 'Сейчас в городе ' + city + ' ' + str(temperature) + ' °C'
-            w_feels = 'Ощущается как ' + str(temperature_feels) + ' °C'
-            sunrise_timestamp = datetime.fromtimestamp(weather_data["sys"]["sunrise"])
-            sunset_timestamp = datetime.fromtimestamp(weather_data["sys"]["sunset"])
-            length_of_the_day = datetime.fromtimestamp(
-                weather_data["sys"]["sunset"]) - datetime.fromtimestamp(weather_data["sys"]["sunrise"])
-            code_to_smile = {
-                "Clear": "Ясно \U00002600",
-                "Clouds": "Облачно \U00002601",
-                "Rain": "Дождь \U00002614",
-                "Drizzle": "Дождь \U00002614",
-                "Thunderstorm": "Гроза \U000026A1",
-                "Snow": "Снег \U0001F328",
-                "Mist": "Туман \U0001F32B"
-            }
-            weather_description = weather_data["weather"][0]["main"]
-            if weather_description in code_to_smile:
-                wd = code_to_smile[weather_description]
-            else:
-                wd = " "
-            bot.send_message(msg.from_user.id,
-                             f"{datetime.now().strftime('%Y-%m-%d %H:%M')}\n{w_now}\n{wd}\n{w_feels}\nВетер: {wind} м/с\n{sss}\nВлажность: {humidity}%\nМаксимальная температура: {temperature_max}°C\nМинимальная температура: {temperature_min}°C\nВосход солнца: {sunrise_timestamp}\nЗаход солнца: {sunset_timestamp}\nПродолжительность дня: {length_of_the_day}\nХорошего дня!")
+                kb = self.bot_goto_start_menu(user_id)
+                self.get_bot().send_message(msg.chat.id, 'Я Вас не понимаю, попробуйте выбрать иное', reply_markup=kb)
+                return
 
+        current_func.append([msg.text, "", ""])
 
     def bot_send_all(self, msg):
         if msg.chat.id == self.get_admin_id():
@@ -298,54 +261,125 @@ class VolleyBot:
 
         self.get_bot().send_message(msg.chat.id, result_message)
 
-    def bot_show_schedule(self, msg):
-        global first_team, second_team
-        if first_team and second_team == "":
+    def bot_show_schedule(self, msg, user_id):
+        current_func = self.get_user_handle(user_id).current_func
+        if len(current_func) < 2 or current_func[-1][0] != 'Расписание и результаты':
+            self.bot_goto_start_menu(user_id)
+            return
+
+        teams_func = current_func[-1]  # new_func[1] == first_team, new_func[2] == second_team
+        if teams_func[1] and teams_func[2] == "":
             keyboard = types.InlineKeyboardMarkup(row_width=2)
             for team in self._storage.get_teams():
-                if team[0] != first_team:
+                if team[0] != teams_func[1]:
                     button = types.InlineKeyboardButton(team[0], callback_data=team[0])
                     keyboard.add(button)
-            bot.send_message(msg.chat.id, "Выберите вторую команду:", reply_markup=keyboard)
+            self.get_bot().send_message(msg.chat.id, "Выберите вторую команду:", reply_markup=keyboard)
 
-    # Обработчик выбора инлайн кнопок
+    # Обработчик выбора inline кнопок
     def bot_handle_button_click(self, call):
-        global first_team, second_team
+        user_id = call.from_user.id
+        current_func = self.get_user_handle(user_id).current_func
+        if len(current_func) < 2 or current_func[-1][0] != 'Расписание и результаты':
+            self.bot_goto_start_menu(user_id)
+            return
 
-        if first_team == "":
-            first_team = call.data
-            self.bot_show_schedule(call.message)  # Call another function for selecting the second team
-        elif first_team and second_team == "":
-            second_team = call.data
+        teams_func = current_func[-1]  # new_func[1] == first_team, new_func[2] == second_team
+        if teams_func[1] == "":
+            teams_func[1] = call.data
+            self.bot_show_schedule(call.message, user_id)  # Call another function for selecting the second team
+        elif teams_func[2] == "":
+            teams_func[2] = call.data
 
             sql_connect = sqlite3.connect(self._storage.db_name)
             cursor = sql_connect.cursor()
 
-            query = "SELECT s.date, s.time, s.result, s.winner, t1.name, t2.name FROM schedule s, teams t1, teams t2 WHERE t1.name in (?, ?) AND t2.name in (?, ?) and s.team1 = t1.id and s.team2 = t2.id"
-            cursor.execute(query, (first_team, second_team, first_team, second_team))
+            query = ("SELECT s.date, s.time, s.result, s.winner, t1.name, t2.name "
+                     "FROM schedule s, teams t1, teams t2 "
+                     "WHERE t1.name in (?, ?) AND t2.name in (?, ?) and s.team1 = t1.id and s.team2 = t2.id")
+
+            cursor.execute(query, (teams_func[1], teams_func[2], teams_func[1], teams_func[2]))
             results = cursor.fetchall()
 
             if results is not None and len(results) != 0:
-                if results[0][2] == None:
-                    bot.send_message(call.message.chat.id,
-                                     f"📅 Дата: {results[0][0]}\n⌛ Время: {results[0][1]}")
+                if results[0][2] is None:
+                    self.get_bot().send_message(call.message.chat.id,
+                                                f"📅 Дата: {results[0][0]}\n⌛ Время: {results[0][1]}")
                 else:
-                    bot.send_message(call.message.chat.id,
-                                     f"📅 Дата: {results[0][0]}\n⌛ Время: {results[0][1]}\nРезультат встречи: {results[0][2]}\nПобедитель: {results[0][3]}")
+                    self.get_bot().send_message(call.message.chat.id,
+                                                f"📅 Дата: {results[0][0]}\n⌛ Время: {results[0][1]}\n"
+                                                f"Результат встречи: {results[0][2]}\nПобедитель: {results[0][3]}")
             else:
-                bot.send_message(call.message.chat.id, "Информация о матче не найдена.")
+                self.get_bot().send_message(call.message.chat.id, "Информация о матче не найдена.")
 
             cursor.close()
             sql_connect.close()
 
             # Reset the selected teams
-            first_team = ""
-            second_team = ""
+            teams_func[1] = teams_func[2] = ""
+
+    def bot_show_weather(self, city: str, user_id) -> None:
+        try:
+            url = 'https://api.openweathermap.org/data/2.5/weather?q=' + city + (
+                '&units=metric&lang=ru&appid=852e6d01a0e4164726ba6652877ff78d')
+            weather_data = requests.get(url).json()
+
+            if 'cod' in weather_data and weather_data['cod'] == '404':
+                self.get_bot().send_message(user_id, weather_data['message'])
+                return
+
+            temperature = round(weather_data['main']['temp'])
+            temperature_feels = round(weather_data['main']['feels_like'])
+            wind = round(weather_data['wind']['speed'])
+            if wind < 5:
+                sss = '✅ Погода хорошая, ветра почти нет'
+            elif wind < 10:
+                sss = '🤔 На улице ветрено, оденьтесь чуть теплее'
+            elif wind < 20:
+                sss = '❗️ Ветер очень сильный, будьте осторожны, выходя из дома'
+            else:
+                sss = '❌ На улице шторм, на улицу лучше не выходить'
+            humidity = round(weather_data['main']['humidity'])
+            temperature_max = round(weather_data['main']['temp_max'])
+            temperature_min = round(weather_data['main']['temp_min'])
+            w_now = 'Сейчас в городе ' + city + ' ' + str(temperature) + ' °C'
+            w_feels = 'Ощущается как ' + str(temperature_feels) + ' °C'
+            sunrise_timestamp = datetime.fromtimestamp(weather_data["sys"]["sunrise"])
+            sunset_timestamp = datetime.fromtimestamp(weather_data["sys"]["sunset"])
+            length_of_the_day = datetime.fromtimestamp(
+                weather_data["sys"]["sunset"]) - datetime.fromtimestamp(weather_data["sys"]["sunrise"])
+            code_to_smile = {
+                "Clear": "Ясно \U00002600",
+                "Clouds": "Облачно \U00002601",
+                "Rain": "Дождь \U00002614",
+                "Drizzle": "Дождь \U00002614",
+                "Thunderstorm": "Гроза \U000026A1",
+                "Snow": "Снег \U0001F328",
+                "Mist": "Туман \U0001F32B"
+            }
+            weather_description = weather_data["weather"][0]["main"]
+            if weather_description in code_to_smile:
+                wd = code_to_smile[weather_description]
+            else:
+                wd = " "
+            self.get_bot().send_message(user_id,
+                                        f"{datetime.now().strftime('%Y-%m-%d %H:%M')}\n{w_now}\n{wd}\n{w_feels}\n"
+                                        f"Ветер: {wind} м/с\n{sss}\n"
+                                        f"Влажность: {humidity}%\n"
+                                        f"Максимальная температура: {temperature_max}°C\n"
+                                        f"Минимальная температура: {temperature_min}°C\n"
+                                        f"Восход солнца: {sunrise_timestamp}\n"
+                                        f"Заход солнца: {sunset_timestamp}\n"
+                                        f"Продолжительность дня: {length_of_the_day}\n"
+                                        f"Хорошего дня!")
+        except Exception as _:
+            self.get_bot().send_message(user_id, "Не удалось получить данные о погоде")
 
 
 opt = dict(getopt.getopt(sys.argv[1:], "b:a", ["bot_token=", "admin_id="])[0])
 volleyBot = VolleyBot(bot_token_=opt["--bot_token"], admin_id_=int(opt["--admin_id"]))
 bot = volleyBot.get_bot()
+
 
 @volleyBot.get_bot().message_handler(commands=['stop'])
 def stop(): volleyBot.bot_stop()
@@ -372,21 +406,19 @@ def message_handler(msg): volleyBot.bot_message(msg)
 
 
 @bot.message_handler(func=lambda message: message.text == 'Расписание и результаты')
-def show_schedule(msg): volleyBot.bot_show_schedule(msg)
+def show_schedule(msg): volleyBot.bot_show_schedule(msg, msg.from_user.id)
 
 
 @bot.callback_query_handler(func=lambda call: True)
 def handle_button_click(call): volleyBot.bot_handle_button_click(call)
 
 
-#функция для сброса резельтатов голосования в определенные дни
+# функция для сброса результатов голосования в определенные дни
 def reset_voting_results_weekly():
-    now = datetime.datetime.now()
-    reset_day_of_week = [0, 3,
-                         5]  # список, который содержит номера дней недели, в которые происходит сброс результатов голосования
-
-    if now.weekday() in reset_day_of_week:
+    # список, содержащий номера дней недели, в которые происходит сброс результатов голосования
+    if datetime.datetime.now().weekday() in [0, 3, 5]:
         volleyBot.clear_voting_results()
+
 
 # Функция 'send_scheduled_message' для отправки сообщения каждому пользователю из списка user_ids
 def send_scheduled_message():
@@ -399,7 +431,8 @@ schedule.every().friday.at('10:00').do(send_scheduled_message)
 schedule.every().sunday.at('10:00').do(send_scheduled_message)
 
 
-# Эта функция запускает запланированные задачи с помощью метода schedule.run_pending() и включает небольшую задержку с помощью time.sleep(1)
+# Эта функция запускает запланированные задачи с помощью метода schedule.run_pending()
+# и включает небольшую задержку с помощью time.sleep(1)
 def schedule_messages():
     while True:
         schedule.run_pending()
@@ -409,6 +442,4 @@ def schedule_messages():
 if __name__ == '__main__':
     scheduling_thread = threading.Thread(target=schedule_messages)
     scheduling_thread.start()
-    bot.infinity_polling()
-
-
+    volleyBot.get_bot().infinity_polling()
