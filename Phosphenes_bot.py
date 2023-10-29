@@ -152,15 +152,15 @@ class VolleyBot:
             self.get_bot().send_message(msg.from_user.id, text=next_msg_text, reply_markup=kb)
         return kb
 
-    def bot_stop(self):
-        self.get_bot().stop_bot()
+    def bot_stop(self, chat_id):
+        self.get_bot().send_message(chat_id, 'Извините, но это действие запрещено')
 
     def bot_start_command(self, msg):
         chat_id = msg.chat.id
         self.add_user_to_active_list(chat_id)
 
         user_id = msg.from_user.id
-        # пока идёт проверка, отключим функциональность, ограничивающую пользователей бота
+        # пока проверка отключим функциональность
         # if not self._storage.is_user_allowed(user_id):  # проверяем, разрешённый ли это пользователь
         #     bot.send_message(chat_id, "Для доступа обратитесь к администратору")
         #     return
@@ -169,7 +169,7 @@ class VolleyBot:
 
         self.get_bot().send_sticker(chat_id, open('стикер.webp', 'rb'))
         self.get_bot().send_message(chat_id,
-                                    text='Hi, {0.first_name}! Click on the button below 👇'.format(msg.from_user),
+                                    text='Привет, {0.first_name}! Ниже выберете действие 👇'.format(msg.from_user),
                                     reply_markup=kb)  # welcome message
 
     def bot_message(self, msg):
@@ -179,7 +179,7 @@ class VolleyBot:
 
         if msg.text == return_btn_name:
             kb = self.bot_goto_start_menu(user_id)
-            self.get_bot().send_message(msg.chat.id, 'Выберете команду', reply_markup=kb)
+            self.get_bot().send_message(msg.chat.id, 'Ниже выберете действие 👇', reply_markup=kb)
             return
 
         elif msg.text == 'Голосование':
@@ -223,7 +223,8 @@ class VolleyBot:
                 return
             else:
                 kb = self.bot_goto_start_menu(user_id)
-                self.get_bot().send_message(msg.chat.id, 'Я Вас не понимаю, попробуйте выбрать иное', reply_markup=kb)
+                self.get_bot().send_message(msg.chat.id, 'Я Вас не понимаю, попробуйте выбрать иное действие 👇',
+                                            reply_markup=kb)
                 return
 
         current_func.append([msg.text, "", ""])
@@ -390,7 +391,7 @@ bot = volleyBot.get_bot()
 
 
 @volleyBot.get_bot().message_handler(commands=['stop'])
-def stop(): volleyBot.bot_stop()
+def stop(msg): volleyBot.bot_stop(msg.chat.id)
 
 
 @volleyBot.get_bot().message_handler(commands=['start'])
