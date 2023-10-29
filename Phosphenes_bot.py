@@ -132,7 +132,7 @@ class VolleyBot:
 
     def bot_send_message_to_allowed_users(self, text):
         for user in self._storage.get_allowed_users():
-            self.get_bot().send_message(user.id, text)
+            self.get_bot().send_message(user, text)
 
     def bot_goto_start_menu(self, user_id):
         self.get_active_user_handle(user_id).current_func = [["main_menu", "", ""]]
